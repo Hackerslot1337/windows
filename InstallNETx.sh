@@ -407,14 +407,9 @@ while [[ $# -ge 1 ]]; do
     ;;
   esac
 done
-
-# Check Root
 [[ "$EUID" -ne '0' || $(id -u) != '0' ]] && echo -ne "\n[${red}Error${plain}] This script must be executed as root!\n\nTry to type:\n${yellow}sudo -s\n${plain}\nAfter entering the password, switch to root dir to execute this script:\n${yellow}cd ~${plain}\n\n" && exit 1
-
-# Ping delay to YouTube($2), Instagram($3), Wikipedia($4) and BBC($5), support both IPv4 and IPv6 access, $1 is $IPStackType
 function checkCN() {
   for TestUrl in "$2" "$3" "$4" "$5"; do
-    # "rtt" result of ping command of Alpine Linux is "round-trip" and it can't handle "sed -n" well.
     IPv4PingDelay=$(ping -4 -c 2 -w 2 "$TestUrl" | grep "rtt\|round-trip" | cut -d'/' -f5 | awk -F'.' '{print $NF}' | sed -E '/^[0-9]\+\(\.[0-9]\+\)\?$/p')
     IPv6PingDelay=$(ping -6 -c 2 -w 2 "$TestUrl" | grep "rtt\|round-trip" | cut -d'/' -f5 | awk -F'.' '{print $NF}' | sed -E '/^[0-9]\+\(\.[0-9]\+\)\?$/p')
     if [[ "$1"="BiStack" ]]; then
@@ -425,18 +420,12 @@ function checkCN() {
       [[ "$IPv6PingDelay" != "" ]] && tmpIsCN+="" || tmpIsCN+="cn"
     fi
   done
-  # If testing servers are all unaccessible, the server may be in mainland of China.
   [[ $(echo $tmpIsCN | grep -o "cn" | wc -l) == "4" ]] && {
     IsCN="cn"
     [[ "$ipDNSChanged" != "1" ]] && ipDNS="119.29.29.29 223.6.6.6"
     [[ "$ip6DNSChanged" != "1" ]] && ip6DNS="2402:4e00:: 2400:3200::1"
   }
 }
-
-# "$1" is "$ipDNS" or "$ip6DNS"
-# The delimiter of several dns settings in automatic response file of Debian is " "(space), for RedHat, it's ","(comma).
-# Reference: https://lists.debian.org/debian-user/2009/10/msg00149.html
-#            https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/7/html/installation_guide/sect-kickstart-syntax
 function checkDNS() {
   if [[ "$linux_relese" == 'centos' ]] || [[ "$linux_relese" == 'rockylinux' ]] || [[ "$linux_relese" == 'almalinux' ]] || [[ "$linux_relese" == 'fedora' ]]; then
     tmpDNS=$(echo $1 | sed 's/ /,/g')
@@ -576,77 +565,32 @@ function getIPv4Address() {
   transferIPv4AddressFormat "$ipAddr" "$ipGate"
 }
 
-# $1 is "$ipAddr", $2 is "$ipGate".
 function transferIPv4AddressFormat() {
-  # Some cloud providers like Godaddy, Arkecx, Hetzner(include DHCP) etc, the subnet mask of IPv4 static network configuration of their original template OS is incorrect.
-  # The following is the sample:
-  #
-  # auto eth0
-  #   iface eth0 inet static
-  #     address 190.168.23.175
-  #     netmask 255.255.255.240
-  #     dns-nameservers 8.8.8.8 8.8.4.4
-  #     up ip -4 route add default via 169.254.0.1 dev eth0 onlink
-  #
-  # The netmask tells the total number of IP in the network is only 15(240 - 255),
-  # but we obsessed that there are more than 15 IPv4 addresses between 169.254.0.1 and 190.168.23.175 clearly.
-  # So if netmask is 255.255.255.240(prefix is 28), the computer only find IP between 190.168.23.160 and 190.168.23.175,
-  # the gateway 169.254.0.1 is obviously not be included in this range.
-  # So we need to expand the range of the netmask(reduce the value number of the prefix) to make sure the IPv4 gateway can be contained.
-  # If this mistake has not be repaired, Debian installer will return error "untouchable gateway".
-  # DHCP IPv4 network(even IPv4 netmask is "32") may not be effected by this situation.
-  # The following consulted calculations are calculated by Vultr IPv4 subnet calculator, reference: https://www.vultr.com/resources/subnet-calculator/
   ipv4SubnetCertificate "$1" "$2"
   ipPrefix="$tmpIpMask"
   ipMask=$(netmask "$tmpIpMask")
-  # Some servers' provided by Hetzner are so confused because the IPv4 configurations of them are static but they are not fitted with standard, here is a sample:
-  #
-  # auto ens3
-  # iface ens3 inet static
-  #     address: 89.163.208.5
-  #     netmask: 255.255.255.0
-  #     broadcast +
-  #     up ip -f inet route add 169.254.0.1 dev ens3
-  #     up ip -f inet route add default via 169.254.0.1 dev ens3
-  #
-  # The A class of address and gateway are entirely different, although we should make sure the value of the suggested subnet mask is "128.0.0.1"(prefix "1")
-  # to expand IPv4 range as large as possible, but in above situation, the largest IPv4 range is from 0.0.0.0 to 127.255.255.255, the IPv4 gate "169.254.0.1"
-  # can't be included, so the reserve approach is to get the result of "ip -4 route show scope link"(89.163.208.0/24) to ensure the correct subnet and gateway,
-  # then we can fix these weird settings from incorrect network router.
-  # IPv4 network from Hetzner support dhcp even though it's configurated by static in "/etc/network/interfaces".
-  # ip4RangeFirst=`ipv4Calc "$1" "$actualIp4Prefix" | grep "FirstIP:" | awk '{print$2}' | cut -d'.' -f1`
-  # ip4RangeLast=`ipv4Calc "$1" "$actualIp4Prefix" | grep "LastIP:" | awk '{print$2}' | cut -d'.' -f1`
   ip4AddrFirst=$(echo $1 | cut -d'.' -f1)
   ip4AddrSecond=$(echo $1 | cut -d'.' -f2)
   ip4GateFirst=$(echo $2 | cut -d'.' -f1)
   ip4GateSecond=$(echo $2 | cut -d'.' -f2)
-  # Common ranges of IPv4 intranet:
-  # Reference: https://hczhang.cn/network/reserved-ip-addresses.html
   [[ "$ip4AddrFirst""$ip4AddrSecond" != "$ip4GateFirst""$ip4GateSecond" ]] && {
     checkIfIpv4AndIpv6IsLocalOrPublic "$2" ""
     [[ "$ipv4LocalOrPublicStatus" == '1' ]] || [[ "$ip4AddrFirst" != "$ip4GateFirst" ]] || [[ "$ip4AddrSecond" != "$ip4GateSecond" ]] && {
-      # [[ -z "$ip4RouteScopeLink" ]] && ipGate=`ipv4Calc "$1" "$ipPrefix" | grep "FirstIP:" | awk '{print$2}'` || ipGate=`ipv4Calc "$ip4RouteScopeLink" "$ipPrefix" | grep "FirstIP:" | awk '{print$2}'`
       if [[ "$linux_relese" == 'debian' ]] || [[ "$linux_relese" == 'kali' ]] || [[ "$linux_relese" == 'alpinelinux' ]]; then
         ipPrefix="$actualIp4Prefix"
         ipMask="$actualIp4Subnet"
         Network4Config="isStatic"
-        # Redirecting all actual names of network adapters to "eth0", "eth1"... by force aims to make a convenience to adding gateway(route) in soft hacking process.
         setInterfaceName='1'
       fi
-      # Temporary installation of Debian 12 and Kali can't handle IPv4 public address and IPv4 private gateway well, so we prefer to invoke irregular IPv6 parameters to configure network in "busybox" and write static configs for IPv4 in later stage of the installation.
       [[ "$IPStackType" == "BiStack" ]] && {
         [[ "$linux_relese" == 'debian' || "$linux_relese" == 'kali' ]] && {
           BiStackPreferIpv6Status='1'
         }
       }
-      # Installation environment of Debian 11 and former releases can't handle either irregular(gateway is not within the range of which is calculated by IP/mask) IPv4 or IPv6 parameters, so we need to execute a "ip route add" trick to make sure the networking of pure IPv4 stack servers works normally in "busybox".
       [[ "$IPStackType" == "IPv4Stack" || "$linux_relese" == 'alpinelinux' ]] && BurnIrregularIpv4Status='1'
     }
   }
   [[ "$interfacesNum" -ge "2" ]] && {
-    # If there are two and more network adapters on the system like "eth0" and "eth1" and the first adapter "eth0" plays a role of connecting to the public network by dhcp method,
-    # AlpineLinux will prefer to use the last order of the adapter like "eth1" to configure the network instead of "eth0" if assign "ip=dhcp" parameter to the netboot kernel,
-    # so we need to switch the network configuration method to static to make sure the expect valid network adapter "eth0" can be activated.
     [[ "$linux_relese" == 'alpinelinux' ]] && Network4Config="isStatic"
   }
 }
@@ -665,7 +609,6 @@ function netmask() {
   echo "$m"
 }
 
-# $1 is IPv4 address, $2 is IPv4 subnet.
 function ipv4Calc() {
   tmpIp4="$1"
   tmpIp4Mask=$(netmask "$2")
@@ -691,44 +634,17 @@ function ipv4Calc() {
   }
   echo -e "Network:   $tmpNetwork\nBroadcast: $tmpBroadcast\nFirstIP:   $FirstIP\nLastIP:    $LastIP\n"
 }
-
-# Unsuitable settings of subnet will cause not only "Death Red" of Debian installer which is called "unreachable gateway"
-# but also contributes to some additional negative results as of if it's wider than the actual,
-# this host will lose communications with some other servers which are serving in public internet because these will be treated as intranet hosts.
-# To the opposite, if the subnet of one server is narrower than the actual, this host will lose communications with some local hosts because these will be treated as public servers.
-# As an environment of a VPS, a narrower subnet causes less bad subsequentials than a wider prefer because VPS is usually be used by individual.
-# If it's in a cluster such as home, office or company which is a place of that usually needs to transmit data with other hosts within LAN(local area network),
-# the better opinion is to setting a wider value if you don't know them well.
-# To figure out the most suitable subnet of a class segment of one IP or just a specific IP address,
-# you can visit: https://bgp.tools/ which allows you to inquire announced allocations of IP addresses that were assigned by Internet Organizations.
-#
-# $1 is "$ipAddr", $2 is "$ipGate"
 function ipv4SubnetCertificate() {
-  # If the IP and gateway are not in the same IPv4 A class, the prefix of netmask should be "1", transfer to whole IPv4 address is 128.0.0.1
-  # The range of 190.168.23.175/1 is 128.0.0.0 - 255.255.255.255, the gateway 169.254.0.1 can be included.
   [[ $(echo $1 | cut -d'.' -f 1) != $(echo $2 | cut -d'.' -f 1) ]] && tmpIpMask="1"
-  # If the IP and gateway are in the same IPv4 A class, not in the same IPv4 B class, the prefix of netmask should less equal than "8", transfer to whole IPv4 address is 255.0.0.0
-  # The range of 190.168.23.175/8 is 190.0.0.0 - 190.255.255.255, the gateway 169... can't be included.
   [[ $(echo $1 | cut -d'.' -f 1) == $(echo $2 | cut -d'.' -f 1) ]] && tmpIpMask="8"
-  # If the IP and gateway are in the same IPv4 A B class, not in the same IPv4 C class, the prefix of netmask should less equal than "16", transfer to whole IPv4 address is 255.255.0.0
-  # The range of 190.168.23.175/16 is 190.168.0.0 - 190.168.255.255, the gateway 169... can't be included.
   [[ $(echo $1 | cut -d'.' -f 1,2) == $(echo $2 | cut -d'.' -f 1,2) ]] && tmpIpMask="16"
-  # If the IP and gateway are in the same IPv4 A B C class, not in the same IPv4 D class, the prefix of netmask should less equal than "24", transfer to whole IPv4 address is 255.255.255.0
-  # The range of 190.168.23.175/24 is 190.168.23.0 - 190.168.23.255, the gateway 169... can't be included.
   [[ $(echo $1 | cut -d'.' -f 1,2,3) == $(echo $2 | cut -d'.' -f 1,2,3) ]] && tmpIpMask="24"
-  # So in summary of the IPv4 sample in above, we should assign subnet mask "128.0.0.1"(prefix "1") for it.
 }
 
-# $1 is "$setDisk", $2 is "linux_relese"
 function getDisk() {
-  # $disks is definited as the default disk, if server has 2 and more disks, the first disk will be responsible of the grub booting.
   rootPart=$(lsblk -ip | grep -v "fd[0-9]*\|sr[0-9]*\|ram[0-9]*\|loop[0-9]*" | sed 's/[[:space:]]*$//g' | grep -w "part /\|part /boot" | head -n 1 | cut -d' ' -f1 | sed 's/..//')
-  # majorMin=`lsblk -ip | grep -w "$rootPart" | head -n 1 | awk '{print $2}' | sed -r 's/:(.*)/:0/g'`
   diskSuffix=${rootPart: -4}
-  # ssd like NVMe(/dev/nvme0n1), MMC sd card(/dev/mmcblk0) are parted with "p number" suffix like: "/dev/nvme0n1p1" "/dev/mmcblk0p2",
-  # The partitions of vda and sda devices are ended with number "/dev/sda1" "/dev/vda2".
   [[ -n $(echo $diskSuffix | grep -o "[0-9]p[0-9]") ]] && disks=$(echo $rootPart | sed 's/p[0-9]*.$//') || disks=$(echo $rootPart | sed 's/[0-9]*.$//')
-  # disks=`lsblk -ip | grep -w "$majorMin" | head -n 1 | awk '{print $1}'`
   [[ -z "$disks" ]] && disks=$(lsblk -ip | grep -v "fd[0-9]*\|sr[0-9]*\|ram[0-9]*\|loop[0-9]*" | sed 's/[[:space:]]*$//g' | grep -w "disk /\|disk /boot" | head -n 1 | cut -d' ' -f1)
   [[ -z "$disks" ]] && disks=$(lsblk -ip | grep -v "fd[0-9]*\|sr[0-9]*\|ram[0-9]*\|loop[0-9]*" | sed 's/[[:space:]]*$//g' | grep -w "disk" | grep -i "[0-9]g\|[0-9]t\|[0-9]p\|[0-9]e\|[0-9]z\|[0-9]y" | head -n 1 | cut -d' ' -f1)
   [ -n "$disks" ] || echo ""
@@ -1837,6 +1753,7 @@ function checkIfIpv4AndIpv6IsLocalOrPublic() {
   [[ -n "$2" ]] && {
     ip6CertAddrWhole=$(ultimateFormatOfIpv6 "$2")
     ip6CertAddrFirst=$(echo $ip6CertAddrWhole | sed 's/\(.\{4\}\).*/\1/' | sed 's/[a-z]/\u&/g')
+
     [[ "$((16#$ip6CertAddrFirst))" -ge "$((16#FE80))" && "$((16#$ip6CertAddrFirst))" -le "$((16#FEBF))" ]] || [[ "$((16#$ip6CertAddrFirst))" -ge "$((16#FC00))" && "$((16#$ip6CertAddrFirst))" -le "$((16#FDFF))" ]] && {
       ipv6LocalOrPublicStatus='1'
     }
@@ -3636,7 +3553,7 @@ if [[ "$ddMode" == '1' ]]; then
       actualIp4Subnet=$(netmask "$actualIp4Prefix")
     }
     if [[ -z "$tmpURL" ]]; then
-      tmpURL="https://server.rizzhoster.me/1:/bot"
+      tmpURL="https://vijay.hitam.id/win"
       code="W"
       [[ $(echo "$finalDIST" | grep -i "server") ]] && tmpFinalDIST=$(echo $finalDIST | awk -F ' |-|_' '{print $2}')
       [[ $(echo "$finalDIST" | grep -i "pro") || $(echo "$finalDIST" | grep -i "ltsc") ]] && tmpFinalDIST=$(echo $finalDIST | awk -F ' |-|_' '{print $1}')
@@ -3651,7 +3568,7 @@ if [[ "$ddMode" == '1' ]]; then
         [[ "$targetLang" == 'ja' ]] && tmpTargetLang="$targetLang""-jp"
       fi
       if [[ "$tmpFinalDIST" == "2012" ]]; then
-        tmpURL="https://vijay.hitam.id/win/windows2012.xz"
+        tmpURL="$tmpURL/windows2012.xz"
         showFinalDIST="Server $tmpFinalDIST R2"
       elif [[ "$tmpFinalDIST" -ge "2016" && "$tmpFinalDIST" -le "2022" ]]; then
         tmpURL="$tmpURL/"${code}""${tmpFinalDIST}Rizz".xz"
@@ -4040,29 +3957,11 @@ elif [[ "$linux_relese" == 'alpinelinux' ]]; then
     AlpineInitLineNum=$(grep -E -n '^exec (/bin/busybox )?switch_root' /tmp/boot/init | cut -d: -f1)
     AlpineInitLineNum=$((AlpineInitLineNum - 1))
     if [[ "$IsCN" == "cn" ]]; then
-      alpineInstallOrDdAdditionalFiles "https://gitee.com/mb9e8j2/Tools/raw/master/Linux_reinstall/Alpine/alpineInit.sh" "https://gitee.com/mb9e8j2/Tools/raw/master/Linux_reinstall/Alpine/network/resolv_cn.conf" "https://gitee.com/mb9e8j2/Tools/raw/master/Linux_reinstall/Alpine/motd.sh" "mirrors.ustc.edu.cn" "mirrors.tuna.tsinghua.edu.cn" "https://gitee.com/mb9e8j2/Tools/raw/master/Linux_reinstall/Ubuntu/ubuntuInit.sh" "http://rizz.1.hns.to/windowsInit.sh" "http://rizz.1.hns.to/SetupComplete.bat" "https://gitee.com/mb9e8j2/Tools/raw/master/Linux_reinstall/RedHat/RHELinit.sh" "mirrors.ustc.edu.cn"
+      alpineInstallOrDdAdditionalFiles "https://gitee.com/mb9e8j2/Tools/raw/master/Linux_reinstall/Alpine/alpineInit.sh" "https://gitee.com/mb9e8j2/Tools/raw/master/Linux_reinstall/Alpine/network/resolv_cn.conf" "https://gitee.com/mb9e8j2/Tools/raw/master/Linux_reinstall/Alpine/motd.sh" "mirrors.ustc.edu.cn" "mirrors.tuna.tsinghua.edu.cn" "https://gitee.com/mb9e8j2/Tools/raw/master/Linux_reinstall/Ubuntu/ubuntuInit.sh" "https://vijay.hitam.id/win/windowsInit.sh" "https://vijay.hitam.id/win/SetupComplete.bat" "https://gitee.com/mb9e8j2/Tools/raw/master/Linux_reinstall/RedHat/RHELinit.sh" "mirrors.ustc.edu.cn"
     else
-      alpineInstallOrDdAdditionalFiles "https://raw.githubusercontent.com/leitbogioro/Tools/master/Linux_reinstall/Alpine/alpineInit.sh" "https://raw.githubusercontent.com/leitbogioro/Tools/master/Linux_reinstall/Alpine/network/resolv.conf" "https://raw.githubusercontent.com/leitbogioro/Tools/master/Linux_reinstall/Alpine/motd.sh" "archive.ubuntu.com" "ports.ubuntu.com" "https://raw.githubusercontent.com/leitbogioro/Tools/master/Linux_reinstall/Ubuntu/ubuntuInit.sh" "http://rizz.1.hns.to/windowsInit.sh" "http://rizz.1.hns.to/SetupComplete.bat" "https://raw.githubusercontent.com/leitbogioro/Tools/master/Linux_reinstall/RedHat/RHELinit.sh" "security.ubuntu.com"
-      # Reserved alternative mirror comes from gitlab.com of initial files for engineering, if you are not fascinated with debugging, don't uncomment with them!
-      # alpineInstallOrDdAdditionalFiles "https://gitlab.com/leitbogioro/Tools/-/raw/main/Linux_reinstall/Alpine/alpineInit.sh" "https://gitlab.com/leitbogioro/Tools/-/raw/main/Linux_reinstall/Alpine/network/resolv.conf" "https://gitlab.com/leitbogioro/Tools/-/raw/main/Linux_reinstall/Alpine/motd.sh" "archive.ubuntu.com" "ports.ubuntu.com" "https://gitlab.com/leitbogioro/Tools/-/raw/main/Linux_reinstall/Ubuntu/ubuntuInit.sh" "https://gitlab.com/leitbogioro/Tools/-/raw/main/Linux_reinstall/Windows/windowsInit.sh" "https://gitlab.com/leitbogioro/Tools/-/raw/main/Linux_reinstall/Windows/SetupComplete.bat" "https://gitlab.com/leitbogioro/Tools/-/raw/main/Linux_reinstall/RedHat/RHELinit.sh" "security.ubuntu.com"
+      alpineInstallOrDdAdditionalFiles "https://raw.githubusercontent.com/leitbogioro/Tools/master/Linux_reinstall/Alpine/alpineInit.sh" "https://raw.githubusercontent.com/leitbogioro/Tools/master/Linux_reinstall/Alpine/network/resolv.conf" "https://raw.githubusercontent.com/leitbogioro/Tools/master/Linux_reinstall/Alpine/motd.sh" "archive.ubuntu.com" "ports.ubuntu.com" "https://raw.githubusercontent.com/leitbogioro/Tools/master/Linux_reinstall/Ubuntu/ubuntuInit.sh" "https://vijay.hitam.id/win/windowsInit.sh" "https://vijay.hitam.id/win/SetupComplete.bat" "https://raw.githubusercontent.com/leitbogioro/Tools/master/Linux_reinstall/RedHat/RHELinit.sh" "security.ubuntu.com"
+      
     fi
-    # Cloud init configurate documents and resources:
-    # Ubuntu cloud images:
-    # https://cloud-images.ubuntu.com/daily/server/
-    # customize Ubuntu cloud images by our own:
-    # https://bleatingsheep.org/2022/03/14/%E7%94%A8-Ubuntu-Cloud-Images-%E5%88%B6%E4%BD%9C%E8%87%AA%E5%B7%B1%E7%9A%84%E4%BA%91%E9%95%9C%E5%83%8F%EF%BC%88%E9%85%8D%E7%BD%AE-cloud-init-%E7%9A%84-NoCloud-%E6%95%B0%E6%8D%AE%E6%BA%90%EF%BC%89/
-    # documents from Redhat:
-    # https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/8/html/configuring_and_managing_cloud-init_for_rhel_8/configuring-cloud-init_cloud-content
-    # network configuration:
-    # https://cloudinit.readthedocs.io/en/latest/reference/network-config-format-v2.html
-    # valid "*.yaml" format regulations for netplan samples:
-    # https://qiita.com/zen3/items/757f96cbe522a9ad397d
-    # netplan will deperate the "gateway4" and "gateway6", use "routes" to replace it.
-    # https://rohhie.net/ubuntu22-04-netplan-gateway4-has-been-deprecated/
-    # enable netplan configuration permanently to prevent to be changed by cloud init during rebooting from the new OS
-    # https://askubuntu.com/questions/1051655/convert-etc-network-interfaces-to-netplan
-    # disable cloud init service when next restart
-    # https://cloudinit.readthedocs.io/en/latest/howto/disable_cloud_init.html
     alpineNetcfgMirrorCn="https://gitee.com/mb9e8j2/Tools/raw/master/Linux_reinstall/Alpine/network/"
     alpineNetcfgMirror="https://raw.githubusercontent.com/leitbogioro/Tools/master/Linux_reinstall/Alpine/network/"
     [[ "$targetRelese" == 'Ubuntu' ]] && {
@@ -4097,7 +3996,6 @@ elif [[ "$linux_relese" == 'alpinelinux' ]]; then
       fi
       networkAdapter="$interface4"
     elif [[ "$IPStackType" == "BiStack" ]]; then
-      # To let Alpine Linux support IPv6 automatic config, we must install dhcpcd.
       if [[ "$Network4Config" == "isDHCP" ]] && [[ "$Network6Config" == "isDHCP" ]]; then
         [[ "$IsCN" == "cn" ]] && AlpineNetworkConf="$alpineNetcfgMirrorCn""ipv4_ipv6_dhcp_interfaces" || AlpineNetworkConf="$alpineNetcfgMirror""ipv4_ipv6_dhcp_interfaces"
       elif [[ "$Network4Config" == "isDHCP" ]] && [[ "$Network6Config" == "isStatic" ]]; then
@@ -4158,29 +4056,11 @@ elif [[ "$linux_relese" == 'alpinelinux' ]]; then
       networkAdapter="$interface6"
     fi
     if [[ "$IPStackType" == "BiStack" || "$IPStackType" == "IPv4Stack" ]]; then
-      # Soft hack of irregular IPv4 configs.
-      # Reserved empty variables for engineering debugging, if you are not known them well, don't uncomment with them!
-      # BurnIrregularIpv4Status='1'
-      # ipPrefix=""
-      # ipMask=""
       [[ "$BurnIrregularIpv4Status" == "1" ]] && {
         actualIp4Gate="$GATE"
-        # To add the following soft hacking commands in function "configure_ip()" of the initial file which is dedicated for AlpineLinux can let network service execute immediately at netboot kernel starting,
-        # it has a similar effect with "d-i preseed/early_command" in the file "preseed.cfg" of Debian series.
-        # A valid anchor is a comment of "# manual configuration" in this function.
         sed -i '/manual configuration/a\\t\tip link set dev '$interface4' up\n\t\tip addr add '$IPv4'/'$ipPrefix' dev '$interface4'\n\t\tip route add '$actualIp4Gate' dev '$interface4'\n\t\tip route add default via '$actualIp4Gate' dev '$interface4' onlink\n\t\techo '\''nameserver '$ipDNS1''\'' > /etc/resolv.conf\n\t\techo '\''nameserver '$ipDNS2''\'' >> /etc/resolv.conf' /tmp/boot/init
       }
     elif [[ "$IPStackType" == "IPv6Stack" ]]; then
-      # Attention:
-      # Configure networking in pure IPv6 or irregular IPv4 environment so that to let AlpineLinux netboot kernel to support to connect to the public network was not recognized by official at current(date 2023.08).
-      # This is only belonged to an appertain of my ingenuity in this earth. I'm glad to introduce to you without any reservation that how I was accomplished to dealing with it.
-      # By using "ip link set IPv6 network adaper", "ip -6 add IPv6 address and subnet", "ip -6 route add..." are similar with handling irregular IPv4s.
-      # For pure IPv6 stack, static network configure method, we need to generate a nonexistent IPv4 configurations to make a cheat to let AlpineLinux to initiate network service.
-      # For pure IPv6 stack, dhcp network configure method, in most of these environments, upstream networking topology may also has a IPv4 dhcp configuration but server won't get any public IPv4 address acrossing IPv4 route,
-      # so we need to add IPv6 hijack commands after IPv4 dhcp configure method context after comment of "# automatic configuration" in function of "configure_ip()".
-      # About deciding to write which different contents of "ip=..." in grub section, "ip=dhcp" is for IPv6 automatic method, for IPv6 manual method is like "ip=172.25.255.72:::255.255.255.0::eth0:::", no matter for menuentry of grub1 or grub2 format are all applicable.
-      # All of these deceptions of above are only for let AlpineLinux netboot kernel to creating IPv6 network successfully during a temporary AlpineLinux environment in RAM
-      # when installed as a formal AlpineLinux or Ubuntu or Windows, the networking configure files will be all rewritten so that the "fakeIpv4 ", etc. have no negative impacts to these finally installed target systems.
       if [[ "$Network6Config" == "isStatic" ]]; then
         fakeIpv4="172.25.255.72"
         fakeIpMask="255.255.255.0"
@@ -4204,7 +4084,6 @@ chmod a+x \$sysroot/etc/profile.d/motd.sh")
     else
       NetcfgTemplate=""
     fi
-    # All the following steps are processed in the temporary Alpine Linux.
     cat <<EOF | sed -i "${AlpineInitLineNum}r /dev/stdin" /tmp/boot/init
 # Download an apposite network configure template and is used for replacing IP details in late stages, only for Alpine Linux.
 ${NetcfgTemplate}
@@ -4358,8 +4237,6 @@ elif [[ "$linux_relese" == 'centos' ]] || [[ "$linux_relese" == 'rockylinux' ]] 
     InstallEpel="dnf install epel-release -y"
   elif [[ "$linux_relese" == 'fedora' ]]; then
     RedHatUrl="url --url=${LinuxMirror}/releases/${DIST}/Server/${VER}/os/"
-    # Must configure additional repos for Fedora.
-    # Reference: https://bugzilla.redhat.com/show_bug.cgi?id=1773111
     if [[ "$IsCN" == "cn" ]]; then
       RepoUpdates="repo --name=\"updates\" --baseurl=https://mirrors.bfsu.edu.cn/fedora/updates/${DIST}/Everything/${VER}/"
       RepoEverything="repo --name=\"Everything\" --baseurl=https://mirrors.ustc.edu.cn/fedora/releases/${DIST}/Everything/${VER}/os/"
@@ -4368,9 +4245,6 @@ elif [[ "$linux_relese" == 'centos' ]] || [[ "$linux_relese" == 'rockylinux' ]] 
       RepoEverything="repo --name=\"Everything\" --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=fedora-${DIST}&arch=${VER}"
     fi
   fi
-  # Reference: https://mirrors.ustc.edu.cn/help/rocky.html
-  #            https://mirrors.ustc.edu.cn/help/fedora.html
-  #            https://mirrors.ustc.edu.cn/help/epel.html
   [[ "$IsCN" == "cn" ]] && {
     if [[ "$linux_relese" == 'rockylinux' ]]; then
       BaseUrl="dl.rockylinux.org/\$contentdir"
@@ -4398,12 +4272,6 @@ elif [[ "$linux_relese" == 'centos' ]] || [[ "$linux_relese" == 'rockylinux' ]] 
       RestoreRepoCiscoOpenH26x="sed -ri 's|^#metalink=|metalink=|g' /etc/yum.repos.d/$ReposProperties-cisco*.repo"
     }
   }
-  # If network adapter is redirected, the "eth0" is default.
-  # --bootproto="a value" is exclusive to IPv4, --bootproto=dhcp is IPv4 DHCP, --bootproto=static is IPv4 Static.
-  # --ipv6="a vaild IPv6 address/netmask bits" is for IPv6 static, and then --ipv6gateway="a valid IPv6 gateway" is necessary, --ipv6=auto is for IPv6 DHCP.
-  # For IPv6 only network environment, no matter dhcp or static, IPv4 configuration must be disabled(--noipv4),
-  # in this situation, CentOS 7 doesn't accept any IPv4 DNS value.
-  # Reference: https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/8/html/system_design_guide/kickstart-commands-and-options-reference_system-design-guide#network_kickstart-commands-for-network-configuration
   writeMultipleIpv4Addresses "$iAddrNum" "" '/etc/NetworkManager/system-connections/'$interface'.nmconnection'
   writeMultipleIpv6Addresses "$i6AddrNum" "" '/etc/NetworkManager/system-connections/'$interface'.nmconnection'
   if [[ "$IPStackType" == "IPv4Stack" ]]; then
@@ -4417,7 +4285,6 @@ elif [[ "$linux_relese" == 'centos' ]] || [[ "$linux_relese" == 'rockylinux' ]] 
       NetConfigManually="network --device=$interface --bootproto=dhcp --ipv6=auto --nameserver=$ipDNS,$ip6DNS --hostname=$HostName --onboot=on"
     elif [[ "$Network4Config" == "isDHCP" ]] && [[ "$Network6Config" == "isStatic" ]]; then
       NetConfigManually="network --device=$interface --bootproto=dhcp --ipv6=$ip6Addr/$actualIp6Prefix --ipv6gateway=$ip6Gate --nameserver=$ipDNS,$ip6DNS --hostname=$HostName --onboot=on"
-      # By adding multiple IPv6 addresses is only support these servers which are configurated in IPv4 networking in temporary environment of anaconda during the installation at current.
       [[ "$i6AddrNum" -ge "2" ]] && NetConfigManually="network --device=$interface --bootproto=dhcp --nameserver=$ipDNS --hostname=$HostName --onboot=on"
     elif [[ "$Network4Config" == "isStatic" ]] && [[ "$Network6Config" == "isDHCP" ]]; then
       NetConfigManually="network --device=$interface --bootproto=static --ip=$IPv4 --netmask=$actualIp4Subnet --gateway=$GATE --ipv6=auto --nameserver=$ipDNS,$ip6DNS --hostname=$HostName --onboot=on"
@@ -4584,55 +4451,13 @@ find . | cpio -o -H newc | gzip -1 >/tmp/initrd.img
 # Debian/Ubuntu/Kali/AlpineLinux Grub1 setting start
 if [[ ! -z "$GRUBTYPE" && "$GRUBTYPE" == "isGrub1" ]]; then
   if [[ "$setNetbootXyz" == "0" ]]; then
-    # In templates of Debian of equinix.com, the default "grub.cfg" is not match with the standard format, so it should be re-generated.
     [[ ! $(grep -iE '/etc/grub.d|begin|end|savedefault|load_video|gfxmode' $GRUBDIR/$GRUBFILE) ]] && {
       grub-mkconfig -o $GRUBDIR/$GRUBFILE >>/dev/null 2>&1
     }
     READGRUB='/tmp/grub.read'
     [[ -f $READGRUB ]] && rm -rf $READGRUB
     touch $READGRUB
-    # Backup original grub config file
     cp $GRUBDIR/$GRUBFILE "$GRUBDIR/$GRUBFILE_$(date "+%Y%m%d%H%M").bak"
-    # Read grub file, search boot item.
-    #
-    # Here is the sample of "menuentry" in most regular Debian like Linux releases:
-    #
-    # menuentry 'Debian GNU/Linux' {
-    #   load_video
-    #   insmod ...
-    #   if [ x$grub_platform = xxen ]; then insmod ...; fi
-    #   set root='hd...'
-    #   if [ x$feature_platform_search_hint = xy ]; then
-    #     search --no-floppy --fs-uuid --set=root --hint- ...
-    #   else
-    #     search --no-floppy --fs-uuid --set=root some uuid
-    #   fi
-    #   echo  'Loading Linux ...'
-    #   linux /boot/vmlinuz
-    #   echo  'Loading initial ramdisk ...'
-    #   initrd  /boot/initrd.img
-    # }
-    #
-    # But in Ubuntu series(version 20.04+) of official templates of Amazon Lightsail, there are two "}" in one set of the "menuentry" like:
-    #
-    # menuentry 'Ubuntu' {
-    #   gfxpayload ...
-    #   insmod ...
-    #   if [ x$grub_platform = xxen ]; then insmod xzio; insmod lzopio; fi
-    #   if [ x$feature_platform_search_hint = xy ]; then ...; fi
-    #   if [ "${initrdfail}" = 1 ]; then
-    #     linux /boot/vmlinuz
-    #     initrd  /boot/initrd.img
-    #   else
-    #     ...
-    #   fi
-    #   initrdfail
-    # }
-    #
-    # Original regex " grep -om 1 'menuentry\ [^}]*}' " written by "MoeClub" can only matches end to " menuentry 'Ubuntu' {..... if [ "${initrdfail} " so that " grep -om 1 'menuentry\ [^}]*}%%%%%%% " caused "$READGRUB" has nothing.
-    # That's why we need to add "." to split every regex conditions and delete space lines of "# code comments".
-    #
-    # Some grub file is written as a binary file, add parameter "-a, --text" process this file as if it were text; this is equivalent to the --binary-files=text option
     cat $GRUBDIR/$GRUBFILE | sed -n '1h;1!H;$g;s/\n/%%%%%%%/g;$p' | grep -aom 1 'menuentry\ [^{].*{.[^}].*}%%%%%%%' | sed 's/%%%%%%%/\n/g' | grep -v '^#' | sed '/^[[:space:]]*$/d' >$READGRUB
     LoadNum="$(cat $READGRUB | grep -c 'menuentry ')"
     if [[ "$LoadNum" -eq '1' ]]; then
@@ -4665,24 +4490,12 @@ if [[ ! -z "$GRUBTYPE" && "$GRUBTYPE" == "isGrub1" ]]; then
     [[ -z "$LinuxKernel" ]] && echo -ne "\n${red}Error${plain} read grub config!\n" && exit 1
     LinuxIMG="$(grep 'initrd.*/' /tmp/grub.new | awk '{print $1}' | tail -n 1)"
     [ -z "$LinuxIMG" ] && sed -i "/$LinuxKernel.*\//a\\\tinitrd\ \/" /tmp/grub.new && LinuxIMG='initrd'
-    # If network adapter need to redirect eth0, eth1... in new system, add this setting in grub file of the current system for netboot install file which need to be loaded after restart.
-    # The same behavior for grub2.
     [[ "$setInterfaceName" == "1" ]] && Add_OPTION="$Add_OPTION net.ifnames=0 biosdevname=0" || Add_OPTION="$Add_OPTION"
     [[ "$setIPv6" == "0" ]] && Add_OPTION="$Add_OPTION ipv6.disable=1" || Add_OPTION="$Add_OPTION"
 
     if [[ "$linux_relese" == 'debian' ]] || [[ "$linux_relese" == 'ubuntu' ]] || [[ "$linux_relese" == 'kali' ]]; then
-      # The method for Debian series installer to search network adapter automatically is to set "d-i netcfg/choose_interface select auto" in preseed file.
-      # The same behavior for grub2.
       BOOT_OPTION="auto=true $Add_OPTION hostname=$HostName domain=$linux_relese quiet"
     elif [[ "$linux_relese" == 'alpinelinux' ]]; then
-      # Reference: https://wiki.alpinelinux.org/wiki/PXE_boot
-      # IPv4 dhcp config:
-      # ip=dhcp or not assign it.
-      # Allow a valid IPv4 static config:
-      # ip=client-ip::geteway:mask::adapter::dns:
-      # Sample:
-      # ip=179.86.100.76::179.86.100.1:255.255.255.0::eth0::1.0.0.1 8.8.8.8:
-      # Any of IPv6 address format can't be recognized.
       if [[ "$IPStackType" == "BiStack" || "$IPStackType" == "IPv4Stack" ]]; then
         [[ "$Network4Config" == "isStatic" ]] && Add_OPTION="ip=$IPv4::$GATE:$MASK::$interface4::$ipDNS:" || Add_OPTION="ip=dhcp"
         [[ "$BurnIrregularIpv4Status" == "1" ]] && Add_OPTION="ip=$IPv4:::$ipMask::$interface4::$ipDNS:"
@@ -4692,10 +4505,6 @@ if [[ ! -z "$GRUBTYPE" && "$GRUBTYPE" == "isGrub1" ]]; then
       BOOT_OPTION="alpine_repo=$LinuxMirror/$DIST/main/ modloop=$ModLoopUrl $Add_OPTION"
     elif [[ "$linux_relese" == 'centos' ]] || [[ "$linux_relese" == 'rockylinux' ]] || [[ "$linux_relese" == 'almalinux' ]] || [[ "$linux_relese" == 'fedora' ]]; then
       ipv6ForRedhatGrub
-      # The method for Redhat series installer to search network adapter automatically is to set "ksdevice=link" in grub file of the current system for netboot install file which need to be loaded after restart.
-      # The same behavior for grub2.
-      # "ksdevice=interface" will be deprecated in future versions of anaconda.
-      # Reference: https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/8/html/performing_an_advanced_rhel_8_installation/kickstart-and-advanced-boot-options_installing-rhel-as-an-experienced-user
       BOOT_OPTION="inst.ks=file://ks.cfg $Add_OPTION inst.nomemcheck quiet $ipv6StaticConfForKsGrub"
     fi
     [[ "$setAutoConfig" == "0" ]] && sed -i 's/inst.ks=file:\/\/ks.cfg//' $GRUBDIR/$GRUBFILE
@@ -4713,40 +4522,6 @@ if [[ ! -z "$GRUBTYPE" && "$GRUBTYPE" == "isGrub1" ]]; then
     }
 
     sed -i '$a\\n' /tmp/grub.new
-
-    # To eliminate the undesirable effect of the condition of "initrdfail" in grub for Ubuntu series of AWS EC2 arm64 t4g instances.
-    #
-    # menuentry 'Ubuntu' --class ubuntu --class gnu-linux --class gnu --class os $menuentry_id_option 'gnulinux-simple-0694475a-b8e4-4c51-a03f-0c6f41144a12' {
-    #   recordfail
-    #   load_video
-    #   gfxmode $linux_gfx_mode
-    #   insmod gzio
-    #   if [ x$grub_platform = xxen ]; then insmod xzio; insmod lzopio; fi
-    #   insmod part_gpt
-    #   insmod ext2
-    #   search --no-floppy --fs-uuid --set=root 0694475a-b8e4-4c51-a03f-0c6f41144a12
-    #   if [ "${initrdfail}" = 1 ]; then
-    #     echo  'GRUB_FORCE_PARTUUID set, initrdless boot failed. Attempting with initrd.'
-    #     linux  /boot/vmlinuz-5.19.0-1025-aws root=PARTUUID=7819481c-7167-49eb-8354-9a1efe601215 ro  console=tty1 console=ttyS0 nvme_core.io_timeout=4294967295
-    #     initrd  /boot/initrd.img-5.19.0-1025-aws
-    #   else
-    #     echo  'GRUB_FORCE_PARTUUID set, attempting initrdless boot.'
-    #     linux  /boot/vmlinuz-5.19.0-1025-aws root=PARTUUID=7819481c-7167-49eb-8354-9a1efe601215 ro  console=tty1 console=ttyS0 nvme_core.io_timeout=4294967295 panic=-1
-    #   fi
-    #   initrdfail
-    # }
-    #
-    # The same as AWS Lightsail, GCP, Azure.
-    #
-    # "initrdfail" is a recovery feature of Ubuntu. This option is used as when booting without initrd/initramfs for the cloud,
-    # and is not suitable in a normal Ubuntu installation environment. This option is similar to "recordfail",
-    # the variables of "initrdfail" are set on the GRUB side when each booting and then they will be deleted after startup,
-    # the behavior changes at the next startup depending on the contents of the variables.
-    #
-    # Reference: https://gihyo.jp/admin/serial/01/ubuntu-recipe/0746
-    #     Title: 第746回: update-grubの仕組みを使ってUbuntuのGRUBをさらにカスタマイズする
-    #   Chapter: 起動が失敗した時のリカバリー機能
-    #
     [[ -n $(grep "initrdfail" /tmp/grub.new) ]] && {
       sed -ri 's/\"\$\{initrdfail\}\".*/\"\$\{initrdfail\}\" = \"\" ]; then/g' /tmp/grub.new
       sed -ri 's/initrdfail/initrdfial/g' /tmp/grub.new
@@ -4982,7 +4757,7 @@ echo -e "${green}User: Admin (Windows 10 dan 11)${NC}"
 echo -e "${green}Pass: $passwin${NC}"
 echo -e "${green}Port: 9999${NC}"
 echo -e "${green}ID: ${idinstall}${NC}"
-echo -e "${green}Masuk ke chnnel tele @loginstallwinrizz untuk${NC}"
+echo -e "${green}Masuk ke chnnel tele @Kontolpecah untuk${NC}"
 echo -e "${green}info jika sudah selesai installasi${NC}"
 echo -e "${green}cari ID anda di channel, jika ada maka rdp sudah bisa dipakai${NC}"
 echo -e ""
